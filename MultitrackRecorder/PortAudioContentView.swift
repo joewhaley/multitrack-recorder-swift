@@ -105,9 +105,45 @@ struct DeviceRowView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.name)
                         .font(.system(.body, design: .monospaced))
-                    Text("Channels: \(device.maxInputChannels)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        Text("Channels: \(device.maxInputChannels)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        // Peak level indicator
+                        if isSelected {
+                            let peakLevel = portAudioManager.devicePeakLevels[device.id] ?? 0.0
+                            let peakDB = peakLevel > 0 ? 20.0 * log10(peakLevel) : -96.0
+                            let isClipping = peakLevel > 0.95
+
+                            HStack(spacing: 4) {
+                                Text("Peak:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                Text(String(format: "%.1f dB", peakDB))
+                                    .font(.caption)
+                                    .foregroundColor(isClipping ? .red : .secondary)
+                                    .monospacedDigit()
+
+                                if isClipping {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                        .help("Clipping detected! Reduce gain or input level")
+                                }
+
+                                Button(action: {
+                                    portAudioManager.resetPeakLevel(for: device.id)
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Reset peak level")
+                            }
+                        }
+                    }
                     
                     // Editable device label
                     HStack(spacing: 4) {
