@@ -136,11 +136,17 @@ class PortAudioManager: ObservableObject {
     private var lastUIUpdateTime: [Int32: Date] = [:]
     private let uiUpdateInterval: TimeInterval = 0.033 // 30 FPS
 
+    // Audio stream health monitoring
+    private var lastAudioDataTime: [Int32: Date] = [:]
+    private var healthMonitorTimer: Timer?
+    private let healthCheckInterval: TimeInterval = 5.0 // Check every 5 seconds
+    private let streamInactivityThreshold: TimeInterval = 10.0 // 10 seconds without data = dead
+
     // Computed property for available devices
     var availableDevices: [PortAudioDevice] {
         return inputDevices
     }
-    
+
     // Static reference for callback access
     private static var currentManager: PortAudioManager?
     
@@ -253,26 +259,100 @@ class PortAudioManager: ObservableObject {
     init() {
         // Set static reference for callback access
         PortAudioManager.currentManager = self
-        
+
         let result = Int32(Pa_Initialize())
         if result == paNoError.rawValue {
             loadInputDevices()
+            startHealthMonitoring()
         } else {
             print("Failed to initialize PortAudio: \(result)")
         }
     }
     
     deinit {
+        // Stop health monitoring
+        stopHealthMonitoring()
+
         // Clean up any remaining userData pointers
         for (_, userData) in userDataPointers {
             userData.deallocate()
         }
         userDataPointers.removeAll()
-        
+
         // Clear static reference
         //PortAudioManager.currentManager = nil
 
         Pa_Terminate()
+    }
+
+    // MARK: - Audio Stream Health Monitoring
+
+    private func startHealthMonitoring() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.healthMonitorTimer = Timer.scheduledTimer(withTimeInterval: self.healthCheckInterval, repeats: true) { [weak self] _ in
+                self?.checkStreamHealth()
+            }
+            print("🏥 Started audio stream health monitoring")
+        }
+    }
+
+    private func stopHealthMonitoring() {
+        healthMonitorTimer?.invalidate()
+        healthMonitorTimer = nil
+        print("🏥 Stopped audio stream health monitoring")
+    }
+
+    private func checkStreamHealth() {
+        let now = Date()
+
+        for deviceID in selectedDevices {
+            // Check if stream exists
+            guard portAudioStreams[deviceID] != nil else {
+                print("⚠️ Missing stream for device \(deviceID), attempting recovery")
+                recoverStream(for: deviceID)
+                continue
+            }
+
+            // Check last activity time
+            if let lastActivity = lastAudioDataTime[deviceID] {
+                let inactiveDuration = now.timeIntervalSince(lastActivity)
+                if inactiveDuration > streamInactivityThreshold {
+                    print("⚠️ Stream for device \(deviceID) inactive for \(inactiveDuration)s, attempting recovery")
+                    recoverStream(for: deviceID)
+                }
+            } else {
+                // No activity recorded yet - give it some time on first check
+                lastAudioDataTime[deviceID] = now
+            }
+        }
+    }
+
+    private func recoverStream(for deviceID: Int32) {
+        print("🔄 Recovering stream for device \(deviceID)")
+
+        // Stop the existing stream if any
+        if let stream = portAudioStreams[deviceID] {
+            Pa_StopStream(stream)
+            Pa_CloseStream(stream)
+            portAudioStreams.removeValue(forKey: deviceID)
+        }
+
+        // Free the allocated userData if any
+        if let userData = userDataPointers[deviceID] {
+            userData.deallocate()
+            userDataPointers.removeValue(forKey: deviceID)
+        }
+
+        // Clear tracking data
+        lastAudioDataTime.removeValue(forKey: deviceID)
+        audioLevels.removeValue(forKey: deviceID)
+        waveformData.removeValue(forKey: deviceID)
+
+        // Restart the stream
+        setupAudioUnit(deviceID: deviceID)
+
+        print("✅ Stream recovery completed for device \(deviceID)")
     }
     
     func loadInputDevices() {
@@ -466,6 +546,9 @@ class PortAudioManager: ObservableObject {
 
                 // Process the audio data
                 guard let input = input else { return paNoError.rawValue }
+
+                // Record activity timestamp for health monitoring
+                manager.lastAudioDataTime[deviceID] = Date()
 
                 // Convert input data to Int16 array (16-bit integer samples)
                 let int16Data = input.assumingMemoryBound(to: Int16.self)
