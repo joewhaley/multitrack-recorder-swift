@@ -154,6 +154,13 @@ struct DeviceRowView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 45, alignment: .trailing)
                             .monospacedDigit()
+
+                        Button("Auto") {
+                            portAudioManager.calculateAutoGain(for: device.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.caption)
+                        .help("Automatically adjust gain based on peak levels")
                     }
                 }
             }

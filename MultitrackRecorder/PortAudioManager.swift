@@ -128,6 +128,10 @@ class PortAudioManager: ObservableObject {
     // Device gain control (stored as linear multiplier)
     @Published var deviceGains: [Int32: Float] = [:]
 
+    // Peak level tracking for auto gain
+    @Published var devicePeakLevels: [Int32: Float] = [:]
+    private var peakLevelResetTime: [Int32: Date] = [:]
+
     // Computed property for available devices
     var availableDevices: [PortAudioDevice] {
         return inputDevices
@@ -209,6 +213,37 @@ class PortAudioManager: ObservableObject {
 
     func getDeviceLinearGain(for deviceID: Int32) -> Float {
         return deviceGains[deviceID] ?? 1.0
+    }
+
+    func resetPeakLevel(for deviceID: Int32) {
+        devicePeakLevels[deviceID] = 0.0
+        peakLevelResetTime[deviceID] = Date()
+    }
+
+    func calculateAutoGain(for deviceID: Int32) {
+        // Get the current peak level
+        guard let peakLevel = devicePeakLevels[deviceID], peakLevel > 0 else {
+            print("⚠️ No peak data available for device \(deviceID)")
+            return
+        }
+
+        // Target peak level: -6dB headroom (0.5 in linear scale)
+        let targetPeak: Float = 0.5
+
+        // Calculate new gain to bring peak to target
+        let newGainLinear = (targetPeak / peakLevel)
+
+        // Convert to dB and clamp to -24dB to +24dB range
+        let newGainDB = 20.0 * log10(newGainLinear)
+        let clampedGainDB = max(-24.0, min(24.0, newGainDB))
+
+        print("🎚️ Auto gain for device \(deviceID): peak=\(peakLevel), new_gain=\(clampedGainDB)dB")
+
+        // Apply the new gain
+        setDeviceGain(clampedGainDB, for: deviceID)
+
+        // Reset peak tracking
+        resetPeakLevel(for: deviceID)
     }
     
     init() {
@@ -451,17 +486,27 @@ class PortAudioManager: ObservableObject {
                     }
                 }
                 
-                // Calculate RMS level (convert to float for calculation)
+                // Calculate RMS level and peak level (convert to float for calculation)
                 let floatSamples = samples.map { Float($0) / 32768.0 } // Convert Int16 to normalized float
                 let sumSquares = floatSamples.map { $0 * $0 }.reduce(0, +)
                 let rms = sqrt(sumSquares / Float(floatSamples.count))
-                
+
+                // Track peak level (absolute maximum value)
+                let peakSample = floatSamples.map { abs($0) }.max() ?? 0.0
+
                 // Scale up very small values for better visualization, but keep in reasonable range
                 let scaledRms = min(1.0, rms * 2.0) // Scale up by 2x but cap at 1.0
 
-                // Update audio level on main thread
+                // Update audio level and peak level on main thread
                 DispatchQueue.main.async {
                     manager.audioLevels[deviceID] = scaledRms
+
+                    // Update peak level if current peak is higher
+                    let currentPeak = manager.devicePeakLevels[deviceID] ?? 0.0
+                    if peakSample > currentPeak {
+                        manager.devicePeakLevels[deviceID] = peakSample
+                    }
+
                     manager.updateCounter += 1
                     // Force UI update by triggering objectWillChange
                     manager.objectWillChange.send()
