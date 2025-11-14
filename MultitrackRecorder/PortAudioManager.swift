@@ -133,6 +133,9 @@ class PortAudioManager: ObservableObject {
     // Audio format selection
     @Published var audioFormat: AudioFormat = .int16
 
+    // M4A conversion setting
+    @Published var convertToM4A: Bool = false
+
     // Dedicated dispatch queue for file I/O operations
     private let fileIOQueue = DispatchQueue(label: "com.multitrack.recorder.fileio", qos: .userInitiated)
     
@@ -741,7 +744,10 @@ class PortAudioManager: ObservableObject {
     public func stopRecording() {
         isRecording = false
         print("Stopping recording and finalizing WAV files...")
-        
+
+        // Keep track of WAV files for potential conversion
+        var wavFilesToConvert: [URL] = []
+
         // Wait for any pending file I/O operations to complete
         fileIOQueue.sync {
             // Finalize WAV files for all recording devices
@@ -750,27 +756,45 @@ class PortAudioManager: ObservableObject {
                     do {
                         // Close the file handle
                         try fileHandle.close()
-                        
+
                         // Update the WAV header with final file size and data size
                         finalizeWavFile(deviceID: deviceID)
-                        
+
+                        // Get the WAV file URL for potential conversion
+                        if let exportDir = getExportDirectory() {
+                            let customLabel = getDeviceLabel(for: deviceID)
+                            let filename = customLabel.isEmpty ?
+                                "device_\(deviceID)_recording.wav" :
+                                "\(customLabel)_recording.wav"
+                            let wavURL = exportDir.appendingPathComponent(filename)
+                            wavFilesToConvert.append(wavURL)
+                        }
+
                         print("Finalized WAV file for device \(deviceID)")
                     } catch {
                         print("Failed to close WAV file for device \(deviceID): \(error)")
                     }
                 }
             }
-            
+
             // Clean up
             wavFileHandles.removeAll()
         }
-        
+
         // Stop accessing security scoped resources
         if let exportDir = BookmarkStore.resolveBookmark() {
             exportDir.stopAccessingSecurityScopedResource()
         }
-        
+
         print("Stopped recording and finalized WAV files")
+
+        // Convert to M4A if option is enabled
+        if convertToM4A {
+            print("Starting M4A conversion for \(wavFilesToConvert.count) file(s)...")
+            for wavURL in wavFilesToConvert {
+                convertWAVtoM4A(wavURL: wavURL)
+            }
+        }
     }
     
     // MARK: - WAV File Streaming Methods
@@ -844,39 +868,94 @@ class PortAudioManager: ObservableObject {
     
     private func finalizeWavFile(deviceID: Int32) {
         guard let exportDir = getExportDirectory() else { return }
-        
+
         let customLabel = getDeviceLabel(for: deviceID)
-        let filename = customLabel.isEmpty ? 
-            "device_\(deviceID)_recording.wav" : 
+        let filename = customLabel.isEmpty ?
+            "device_\(deviceID)_recording.wav" :
             "\(customLabel)_recording.wav"
         let fileURL = exportDir.appendingPathComponent(filename)
-        
+
         do {
             // Read the current file to get the data size
             let fileData = try Data(contentsOf: fileURL)
             let headerSize = 44 // Standard WAV header size
             let dataSize = UInt32(fileData.count - headerSize)
             let fileSize = UInt32(fileData.count - 8) // Total file size minus 8 bytes for RIFF header
-            
+
             // Create updated header with correct sizes using shared utility
             let updatedHeader = createWavHeader(fileSize: fileSize, dataSize: dataSize)
-            
+
             // Read the audio data (everything after the header)
             let audioData = fileData.suffix(from: headerSize)
-            
+
             // Write the complete file with correct header
             var finalWavData = updatedHeader
             finalWavData.append(audioData)
-            
+
             try finalWavData.write(to: fileURL)
-            
+
             print("Finalized WAV file for device \(deviceID) with data size: \(dataSize) bytes")
         } catch {
             print("Failed to finalize WAV file for device \(deviceID): \(error)")
         }
     }
-    
+
+    // MARK: - M4A Conversion
+
+    private func convertWAVtoM4A(wavURL: URL) {
+        // Create M4A output URL (replace .wav extension with .m4a)
+        let m4aURL = wavURL.deletingPathExtension().appendingPathExtension("m4a")
+
+        print("🔄 Converting \(wavURL.lastPathComponent) to M4A...")
+
+        // Create an AVAsset from the WAV file
+        let asset = AVAsset(url: wavURL)
+
+        // Check if the asset is valid and has audio tracks
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            print("❌ Failed to create export session for \(wavURL.lastPathComponent)")
+            return
+        }
+
+        // Configure the export session
+        exportSession.outputURL = m4aURL
+        exportSession.outputFileType = .m4a
+
+        // Start the export asynchronously
+        exportSession.exportAsynchronously {
+            switch exportSession.status {
+            case .completed:
+                print("✅ Successfully converted to \(m4aURL.lastPathComponent)")
+
+                // Delete the original WAV file
+                self.deleteWAVFile(wavURL: wavURL)
+
+            case .failed:
+                if let error = exportSession.error {
+                    print("❌ M4A conversion failed for \(wavURL.lastPathComponent): \(error.localizedDescription)")
+                } else {
+                    print("❌ M4A conversion failed for \(wavURL.lastPathComponent)")
+                }
+
+            case .cancelled:
+                print("⚠️ M4A conversion cancelled for \(wavURL.lastPathComponent)")
+
+            default:
+                print("⚠️ M4A conversion ended with status: \(exportSession.status.rawValue)")
+            }
+        }
+    }
+
+    private func deleteWAVFile(wavURL: URL) {
+        do {
+            try FileManager.default.removeItem(at: wavURL)
+            print("🗑️ Deleted original WAV file: \(wavURL.lastPathComponent)")
+        } catch {
+            print("❌ Failed to delete WAV file \(wavURL.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
 
 }
+
 
 

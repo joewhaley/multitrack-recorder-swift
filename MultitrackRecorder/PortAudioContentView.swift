@@ -288,6 +288,19 @@ struct RecordingControlsView: View {
                         .foregroundColor(.orange)
                 }
             }
+
+            // M4A Conversion Toggle
+            HStack(spacing: 10) {
+                Toggle("Convert to M4A after recording", isOn: $portAudioManager.convertToM4A)
+                    .font(.caption)
+                    .disabled(portAudioManager.isRecording)
+
+                if portAudioManager.convertToM4A {
+                    Text("(WAV files will be deleted after conversion)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             
             // Recording Controls
             HStack(spacing: 20) {
