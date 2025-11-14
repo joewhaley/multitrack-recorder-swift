@@ -105,8 +105,33 @@ struct DeviceRowView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.name)
                         .font(.system(.body, design: .monospaced))
+
                     HStack(spacing: 8) {
-                        Text("Channels: \(device.maxInputChannels)")
+                        Text("ID: \(device.portAudioIndex)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text(device.hostApi)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text("Ch: \(device.maxInputChannels)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text(String(format: "%.0f Hz", device.defaultSampleRate))
                             .font(.caption)
                             .foregroundColor(.secondary)
 
@@ -144,7 +169,7 @@ struct DeviceRowView: View {
                             }
                         }
                     }
-                    
+
                     // Editable device label
                     HStack(spacing: 4) {
                         TextField("Add label...", text: Binding(
