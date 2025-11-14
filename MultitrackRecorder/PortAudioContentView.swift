@@ -119,7 +119,7 @@ struct DeviceRowView: View {
                         .font(.caption)
                         .frame(width: 120)
                         .disabled(portAudioManager.isRecording)
-                        
+
                         if !portAudioManager.getDeviceLabel(for: device.id).isEmpty {
                             Button(action: {
                                 portAudioManager.clearDeviceLabel(for: device.id)
@@ -132,9 +132,32 @@ struct DeviceRowView: View {
                             .disabled(portAudioManager.isRecording)
                         }
                     }
+
+                    // Gain control
+                    HStack(spacing: 8) {
+                        Text("Gain:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Slider(
+                            value: Binding(
+                                get: { portAudioManager.getDeviceGain(for: device.id) },
+                                set: { portAudioManager.setDeviceGain($0, for: device.id) }
+                            ),
+                            in: -24...24,
+                            step: 1
+                        )
+                        .frame(width: 80)
+
+                        Text(String(format: "%+.0f dB", portAudioManager.getDeviceGain(for: device.id)))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(width: 45, alignment: .trailing)
+                            .monospacedDigit()
+                    }
                 }
             }
-            .frame(width: 200, alignment: .leading)
+            .frame(width: 280, alignment: .leading)
             
             // Live waveform (always present to prevent layout shifts)
             PortAudioWaveformView(deviceIndex: device.id, isSelected: isSelected, manager: portAudioManager)

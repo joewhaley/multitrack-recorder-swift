@@ -124,7 +124,10 @@ class PortAudioManager: ObservableObject {
     
     // Device labels for user customization
     @Published var deviceLabels: [Int32: String] = [:]
-    
+
+    // Device gain control (stored as linear multiplier)
+    @Published var deviceGains: [Int32: Float] = [:]
+
     // Computed property for available devices
     var availableDevices: [PortAudioDevice] {
         return inputDevices
@@ -188,6 +191,24 @@ class PortAudioManager: ObservableObject {
     
     func clearDeviceLabel(for deviceID: Int32) {
         deviceLabels.removeValue(forKey: deviceID)
+    }
+
+    // MARK: - Device Gain Management
+
+    func setDeviceGain(_ gainDB: Float, for deviceID: Int32) {
+        // Convert dB to linear multiplier: linear = 10^(dB/20)
+        let linearGain = pow(10.0, gainDB / 20.0)
+        deviceGains[deviceID] = linearGain
+    }
+
+    func getDeviceGain(for deviceID: Int32) -> Float {
+        // Convert linear multiplier to dB: dB = 20 * log10(linear)
+        let linearGain = deviceGains[deviceID] ?? 1.0
+        return 20.0 * log10(linearGain)
+    }
+
+    func getDeviceLinearGain(for deviceID: Int32) -> Float {
+        return deviceGains[deviceID] ?? 1.0
     }
     
     init() {
@@ -406,10 +427,20 @@ class PortAudioManager: ObservableObject {
 
                 // Process the audio data
                 guard let input = input else { return paNoError.rawValue }
-                
+
                 // Convert input data to Int16 array (16-bit integer samples)
                 let int16Data = input.assumingMemoryBound(to: Int16.self)
-                let samples = Array(UnsafeBufferPointer(start: int16Data, count: Int(frameCount)))
+                var samples = Array(UnsafeBufferPointer(start: int16Data, count: Int(frameCount)))
+
+                // Apply gain control
+                let linearGain = manager.getDeviceLinearGain(for: deviceID)
+                if linearGain != 1.0 {
+                    samples = samples.map { sample in
+                        let gainedSample = Float(sample) * linearGain
+                        // Clamp to Int16 range to prevent overflow
+                        return Int16(max(-32768, min(32767, gainedSample)))
+                    }
+                }
                 
                 // Add to recording buffer if recording (for waveform display)
                 if manager.isRecording {
