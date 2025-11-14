@@ -289,14 +289,23 @@ struct RecordingControlsView: View {
                 }
             }
 
-            // M4A Conversion Toggle
+            // Output Format Selection
             HStack(spacing: 10) {
-                Toggle("Convert to M4A after recording", isOn: $portAudioManager.convertToM4A)
+                Text("Output Format:")
                     .font(.caption)
-                    .disabled(portAudioManager.isRecording)
+                    .foregroundColor(.secondary)
 
-                if portAudioManager.convertToM4A {
-                    Text("(WAV files will be deleted after conversion)")
+                Picker("", selection: $portAudioManager.outputFormat) {
+                    ForEach(OutputFormat.allCases) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 200)
+                .disabled(portAudioManager.isRecording)
+
+                if portAudioManager.outputFormat.needsConversion {
+                    Text("(WAV files will be converted and deleted)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

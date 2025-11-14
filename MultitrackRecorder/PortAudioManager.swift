@@ -93,7 +93,7 @@ enum BookmarkStore {
 
 // Use PortAudio types directly from bridging header
 
-// Audio format enumeration
+// Audio format enumeration (for recording)
 enum AudioFormat: String, CaseIterable, Identifiable {
     case int16 = "16-bit Integer"
     case float32 = "32-bit Float"
@@ -104,6 +104,41 @@ enum AudioFormat: String, CaseIterable, Identifiable {
         switch self {
         case .int16: return paInt16
         case .float32: return paFloat32
+        }
+    }
+}
+
+// Output format enumeration (for final file)
+enum OutputFormat: String, CaseIterable, Identifiable {
+    case wav = "WAV (uncompressed)"
+    case m4a = "M4A (AAC)"
+    case mp3 = "MP3"
+    case ac3 = "AC3 (Dolby Digital)"
+    case eac3 = "EAC3 (Dolby Digital Plus)"
+
+    var id: String { rawValue }
+
+    var fileExtension: String {
+        switch self {
+        case .wav: return "wav"
+        case .m4a: return "m4a"
+        case .mp3: return "mp3"
+        case .ac3: return "ac3"
+        case .eac3: return "eac3"
+        }
+    }
+
+    var needsConversion: Bool {
+        return self != .wav
+    }
+
+    var audioFormatID: AudioFormatID {
+        switch self {
+        case .wav: return kAudioFormatLinearPCM
+        case .m4a: return kAudioFormatMPEG4AAC
+        case .mp3: return kAudioFormatMPEGLayer3
+        case .ac3: return kAudioFormatAC3
+        case .eac3: return kAudioFormatEnhancedAC3
         }
     }
 }
@@ -130,11 +165,11 @@ class PortAudioManager: ObservableObject {
     
     @Published private(set) var isRecording = false
 
-    // Audio format selection
+    // Audio format selection (for recording)
     @Published var audioFormat: AudioFormat = .int16
 
-    // M4A conversion setting
-    @Published var convertToM4A: Bool = false
+    // Output format selection (for final file)
+    @Published var outputFormat: OutputFormat = .wav
 
     // Dedicated dispatch queue for file I/O operations
     private let fileIOQueue = DispatchQueue(label: "com.multitrack.recorder.fileio", qos: .userInitiated)
@@ -788,11 +823,11 @@ class PortAudioManager: ObservableObject {
 
         print("Stopped recording and finalized WAV files")
 
-        // Convert to M4A if option is enabled
-        if convertToM4A {
-            print("Starting M4A conversion for \(wavFilesToConvert.count) file(s)...")
+        // Convert to selected output format if needed
+        if outputFormat.needsConversion {
+            print("Starting \(outputFormat.fileExtension.uppercased()) conversion for \(wavFilesToConvert.count) file(s)...")
             for wavURL in wavFilesToConvert {
-                convertWAVtoM4A(wavURL: wavURL)
+                convertWAVToFormat(wavURL: wavURL, outputFormat: outputFormat)
             }
         }
     }
@@ -900,14 +935,24 @@ class PortAudioManager: ObservableObject {
         }
     }
 
-    // MARK: - M4A Conversion
+    // MARK: - Audio Format Conversion
 
-    private func convertWAVtoM4A(wavURL: URL) {
-        // Create M4A output URL (replace .wav extension with .m4a)
-        let m4aURL = wavURL.deletingPathExtension().appendingPathExtension("m4a")
+    private func convertWAVToFormat(wavURL: URL, outputFormat: OutputFormat) {
+        // Create output URL with appropriate extension
+        let outputURL = wavURL.deletingPathExtension().appendingPathExtension(outputFormat.fileExtension)
 
-        print("🔄 Converting \(wavURL.lastPathComponent) to M4A...")
+        print("🔄 Converting \(wavURL.lastPathComponent) to \(outputFormat.fileExtension.uppercased())...")
 
+        // Use AVAssetExportSession for M4A (most reliable method)
+        if outputFormat == .m4a {
+            convertUsingExportSession(wavURL: wavURL, outputURL: outputURL, outputFormat: outputFormat)
+        } else {
+            // Use AVAssetWriter for other formats
+            convertUsingAssetWriter(wavURL: wavURL, outputURL: outputURL, outputFormat: outputFormat)
+        }
+    }
+
+    private func convertUsingExportSession(wavURL: URL, outputURL: URL, outputFormat: OutputFormat) {
         // Create an AVAsset from the WAV file
         let asset = AVAsset(url: wavURL)
 
@@ -918,31 +963,170 @@ class PortAudioManager: ObservableObject {
         }
 
         // Configure the export session
-        exportSession.outputURL = m4aURL
+        exportSession.outputURL = outputURL
         exportSession.outputFileType = .m4a
 
         // Start the export asynchronously
         exportSession.exportAsynchronously {
             switch exportSession.status {
             case .completed:
-                print("✅ Successfully converted to \(m4aURL.lastPathComponent)")
-
-                // Delete the original WAV file
+                print("✅ Successfully converted to \(outputURL.lastPathComponent)")
                 self.deleteWAVFile(wavURL: wavURL)
 
             case .failed:
                 if let error = exportSession.error {
-                    print("❌ M4A conversion failed for \(wavURL.lastPathComponent): \(error.localizedDescription)")
+                    print("❌ Conversion failed for \(wavURL.lastPathComponent): \(error.localizedDescription)")
                 } else {
-                    print("❌ M4A conversion failed for \(wavURL.lastPathComponent)")
+                    print("❌ Conversion failed for \(wavURL.lastPathComponent)")
                 }
 
             case .cancelled:
-                print("⚠️ M4A conversion cancelled for \(wavURL.lastPathComponent)")
+                print("⚠️ Conversion cancelled for \(wavURL.lastPathComponent)")
 
             default:
-                print("⚠️ M4A conversion ended with status: \(exportSession.status.rawValue)")
+                print("⚠️ Conversion ended with status: \(exportSession.status.rawValue)")
             }
+        }
+    }
+
+    private func convertUsingAssetWriter(wavURL: URL, outputURL: URL, outputFormat: OutputFormat) {
+        // Create an AVAsset from the WAV file
+        let asset = AVAsset(url: wavURL)
+
+        // Get the audio track
+        Task {
+            do {
+                let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+                guard let audioTrack = audioTracks.first else {
+                    print("❌ No audio track found in \(wavURL.lastPathComponent)")
+                    return
+                }
+
+                // Remove existing file if it exists
+                try? FileManager.default.removeItem(at: outputURL)
+
+                // Create asset writer
+                let writer = try AVAssetWriter(outputURL: outputURL, fileType: self.fileTypeForFormat(outputFormat))
+
+                // Configure output settings based on format
+                let outputSettings = try self.outputSettingsForFormat(outputFormat)
+
+                // Create asset writer input
+                let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
+                writerInput.expectsMediaDataInRealTime = false
+
+                // Add input to writer
+                guard writer.canAdd(writerInput) else {
+                    print("❌ Cannot add writer input for \(outputFormat.fileExtension.uppercased())")
+                    return
+                }
+                writer.add(writerInput)
+
+                // Create asset reader
+                let reader = try AVAssetReader(asset: asset)
+                let readerOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+                guard reader.canAdd(readerOutput) else {
+                    print("❌ Cannot add reader output")
+                    return
+                }
+                reader.add(readerOutput)
+
+                // Start reading and writing
+                guard writer.startWriting() else {
+                    print("❌ Failed to start writing: \(writer.error?.localizedDescription ?? "unknown error")")
+                    return
+                }
+
+                writer.startSession(atSourceTime: .zero)
+                guard reader.startReading() else {
+                    print("❌ Failed to start reading: \(reader.error?.localizedDescription ?? "unknown error")")
+                    return
+                }
+
+                // Process samples
+                let queue = DispatchQueue(label: "audio.conversion.queue")
+                writerInput.requestMediaDataWhenReady(on: queue) {
+                    while writerInput.isReadyForMoreMediaData {
+                        guard let sampleBuffer = readerOutput.copyNextSampleBuffer() else {
+                            writerInput.markAsFinished()
+                            break
+                        }
+                        writerInput.append(sampleBuffer)
+                    }
+
+                    // Wait for completion
+                    if reader.status == .completed {
+                        writer.finishWriting {
+                            if writer.status == .completed {
+                                print("✅ Successfully converted to \(outputURL.lastPathComponent)")
+                                self.deleteWAVFile(wavURL: wavURL)
+                            } else if let error = writer.error {
+                                print("❌ Conversion failed: \(error.localizedDescription)")
+                            }
+                        }
+                    } else if let error = reader.error {
+                        print("❌ Reading failed: \(error.localizedDescription)")
+                    }
+                }
+            } catch {
+                print("❌ Conversion error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func fileTypeForFormat(_ format: OutputFormat) -> AVFileType {
+        switch format {
+        case .wav: return .wav
+        case .m4a: return .m4a
+        case .mp3: return .mp3
+        case .ac3: return .ac3
+        case .eac3: return .eac3
+        }
+    }
+
+    private func outputSettingsForFormat(_ format: OutputFormat) throws -> [String: Any] {
+        switch format {
+        case .wav:
+            return [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+
+        case .m4a:
+            return [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 128000
+            ]
+
+        case .mp3:
+            return [
+                AVFormatIDKey: kAudioFormatMPEGLayer3,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 192000
+            ]
+
+        case .ac3:
+            return [
+                AVFormatIDKey: kAudioFormatAC3,
+                AVSampleRateKey: 48000,  // AC3 typically uses 48kHz
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 192000
+            ]
+
+        case .eac3:
+            return [
+                AVFormatIDKey: kAudioFormatEnhancedAC3,
+                AVSampleRateKey: 48000,  // EAC3 typically uses 48kHz
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 128000
+            ]
         }
     }
 
