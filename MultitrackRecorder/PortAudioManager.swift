@@ -471,7 +471,16 @@ class PortAudioManager: ObservableObject {
                 let linearGain = manager.getDeviceLinearGain(for: deviceID)
                 if linearGain != 1.0 {
                     samples = samples.map { sample in
-                        let gainedSample = Float(sample) * linearGain
+                        var gainedSample = Float(sample) * linearGain
+
+                        // Handle NaN and infinite values
+                        if gainedSample.isNaN {
+                            gainedSample = 0.0  // Replace NaN with silence
+                        } else if gainedSample.isInfinite {
+                            // Replace +/-inf with max/min valid values
+                            gainedSample = gainedSample > 0 ? 32767.0 : -32768.0
+                        }
+
                         // Clamp to Int16 range to prevent overflow
                         return Int16(max(-32768, min(32767, gainedSample)))
                     }
@@ -513,9 +522,18 @@ class PortAudioManager: ObservableObject {
                 }
                 
                 // Update waveform data (downsample for display) with proper scaling
-                let downsampledData = stride(from: 0, to: floatSamples.count, by: max(1, floatSamples.count / 100)).map { 
+                let downsampledData = stride(from: 0, to: floatSamples.count, by: max(1, floatSamples.count / 100)).map {
+                    var scaledSample = floatSamples[$0] * 2.0
+
+                    // Handle NaN and infinite values in waveform data
+                    if scaledSample.isNaN {
+                        scaledSample = 0.0
+                    } else if scaledSample.isInfinite {
+                        scaledSample = scaledSample > 0 ? 1.0 : -1.0
+                    }
+
                     // Scale the samples but keep them in the -1.0 to 1.0 range
-                    min(1.0, max(-1.0, floatSamples[$0] * 2.0))
+                    return min(1.0, max(-1.0, scaledSample))
                 }
                 
                 DispatchQueue.main.async {
