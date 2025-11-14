@@ -109,12 +109,11 @@ enum AudioFormat: String, CaseIterable, Identifiable {
 }
 
 // Output format enumeration (for final file)
+// Only includes formats natively supported by AVFoundation on macOS
 enum OutputFormat: String, CaseIterable, Identifiable {
-    case wav = "WAV (uncompressed)"
+    case wav = "WAV"
     case m4a = "M4A (AAC)"
-    case mp3 = "MP3"
-    case ac3 = "AC3 (Dolby Digital)"
-    case eac3 = "EAC3 (Dolby Digital Plus)"
+    case aiff = "AIFF"
 
     var id: String { rawValue }
 
@@ -122,9 +121,7 @@ enum OutputFormat: String, CaseIterable, Identifiable {
         switch self {
         case .wav: return "wav"
         case .m4a: return "m4a"
-        case .mp3: return "mp3"
-        case .ac3: return "ac3"
-        case .eac3: return "eac3"
+        case .aiff: return "aiff"
         }
     }
 
@@ -132,13 +129,11 @@ enum OutputFormat: String, CaseIterable, Identifiable {
         return self != .wav
     }
 
-    var audioFormatID: AudioFormatID {
+    var description: String {
         switch self {
-        case .wav: return kAudioFormatLinearPCM
-        case .m4a: return kAudioFormatMPEG4AAC
-        case .mp3: return kAudioFormatMPEGLayer3
-        case .ac3: return kAudioFormatAC3
-        case .eac3: return kAudioFormatEnhancedAC3
+        case .wav: return "Uncompressed PCM audio, universally compatible"
+        case .m4a: return "Compressed AAC audio, ~10x smaller than WAV"
+        case .aiff: return "Uncompressed audio, Mac/iOS native format"
         }
     }
 }
@@ -1078,9 +1073,7 @@ class PortAudioManager: ObservableObject {
         switch format {
         case .wav: return .wav
         case .m4a: return .m4a
-        case .mp3: return .mp3
-        case .ac3: return .ac3
-        case .eac3: return .eac3
+        case .aiff: return .aiff
         }
     }
 
@@ -1104,28 +1097,14 @@ class PortAudioManager: ObservableObject {
                 AVEncoderBitRateKey: 128000
             ]
 
-        case .mp3:
+        case .aiff:
             return [
-                AVFormatIDKey: kAudioFormatMPEGLayer3,
+                AVFormatIDKey: kAudioFormatLinearPCM,
                 AVSampleRateKey: 44100,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 192000
-            ]
-
-        case .ac3:
-            return [
-                AVFormatIDKey: kAudioFormatAC3,
-                AVSampleRateKey: 48000,  // AC3 typically uses 48kHz
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 192000
-            ]
-
-        case .eac3:
-            return [
-                AVFormatIDKey: kAudioFormatEnhancedAC3,
-                AVSampleRateKey: 48000,  // EAC3 typically uses 48kHz
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 128000
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: true  // AIFF uses big-endian
             ]
         }
     }
