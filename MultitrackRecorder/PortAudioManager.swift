@@ -379,8 +379,8 @@ class PortAudioManager: ObservableObject {
         var inputParameters = PaStreamParameters()
         inputParameters.device = device.portAudioIndex  // Use the PortAudio index for stream operations
         inputParameters.channelCount = 1
-        inputParameters.sampleFormat = paFloat32
-        inputParameters.suggestedLatency = 0.1
+        inputParameters.sampleFormat = paInt16  // Use 16-bit integer format instead of float
+        inputParameters.suggestedLatency = device.defaultLowInputLatency
         inputParameters.hostApiSpecificStreamInfo = nil
         
         var stream: UnsafeMutableRawPointer?
@@ -407,9 +407,9 @@ class PortAudioManager: ObservableObject {
                 // Process the audio data
                 guard let input = input else { return paNoError.rawValue }
                 
-                // Convert input data to Float array
-                let floatData = input.assumingMemoryBound(to: Float.self)
-                let samples = Array(UnsafeBufferPointer(start: floatData, count: Int(frameCount)))
+                // Convert input data to Int16 array (16-bit integer samples)
+                let int16Data = input.assumingMemoryBound(to: Int16.self)
+                let samples = Array(UnsafeBufferPointer(start: int16Data, count: Int(frameCount)))
                 
                 // Add to recording buffer if recording (for waveform display)
                 if manager.isRecording {
@@ -420,13 +420,14 @@ class PortAudioManager: ObservableObject {
                     }
                 }
                 
-                // Calculate RMS level
-                let sumSquares = samples.map { $0 * $0 }.reduce(0, +)
-                let rms = sqrt(sumSquares / Float(samples.count))
+                // Calculate RMS level (convert to float for calculation)
+                let floatSamples = samples.map { Float($0) / 32768.0 } // Convert Int16 to normalized float
+                let sumSquares = floatSamples.map { $0 * $0 }.reduce(0, +)
+                let rms = sqrt(sumSquares / Float(floatSamples.count))
                 
                 // Scale up very small values for better visualization, but keep in reasonable range
-                let scaledRms = min(1.0, rms * 100.0) // Scale up by 100x but cap at 1.0
-                
+                let scaledRms = min(1.0, rms * 2.0) // Scale up by 2x but cap at 1.0
+
                 // Update audio level on main thread
                 DispatchQueue.main.async {
                     manager.audioLevels[deviceID] = scaledRms
@@ -436,9 +437,9 @@ class PortAudioManager: ObservableObject {
                 }
                 
                 // Update waveform data (downsample for display) with proper scaling
-                let downsampledData = stride(from: 0, to: samples.count, by: max(1, samples.count / 100)).map { 
+                let downsampledData = stride(from: 0, to: floatSamples.count, by: max(1, floatSamples.count / 100)).map { 
                     // Scale the samples but keep them in the -1.0 to 1.0 range
-                    min(1.0, max(-1.0, samples[$0] * 100.0))
+                    min(1.0, max(-1.0, floatSamples[$0] * 2.0))
                 }
                 
                 DispatchQueue.main.async {
@@ -587,19 +588,14 @@ class PortAudioManager: ObservableObject {
         return createWavHeader(fileSize: 0xFFFFFFFF, dataSize: 0xFFFFFFFF)
     }
     
-    private func streamAudioData(deviceID: Int32, samples: [Float]) {
+    private func streamAudioData(deviceID: Int32, samples: [Int16]) {
         // This method is now called on the file I/O queue
         // Check if we're still recording and have a valid file handle
         guard isRecording, let fileHandle = wavFileHandles[deviceID] else { return }
         
-        // Convert float samples to 16-bit PCM
-        let pcmData = samples.map { sample -> Int16 in
-            let clampedSample = max(-1.0, min(1.0, sample))
-            return Int16(clampedSample * Float(Int16.max))
-        }
-        
-        // Convert to Data and write to file
-        let pcmDataBytes = pcmData.withUnsafeBufferPointer { Data(buffer: $0) }
+        // Samples are already in Int16 format, no conversion needed
+        // Convert to Data and write to file directly
+        let pcmDataBytes = samples.withUnsafeBufferPointer { Data(buffer: $0) }
         
         do {
             try fileHandle.write(contentsOf: pcmDataBytes)
