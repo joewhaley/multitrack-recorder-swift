@@ -132,6 +132,10 @@ class PortAudioManager: ObservableObject {
     @Published var devicePeakLevels: [Int32: Float] = [:]
     private var peakLevelResetTime: [Int32: Date] = [:]
 
+    // UI update throttling (30 FPS = ~33ms between updates)
+    private var lastUIUpdateTime: [Int32: Date] = [:]
+    private let uiUpdateInterval: TimeInterval = 0.033 // 30 FPS
+
     // Computed property for available devices
     var availableDevices: [PortAudioDevice] {
         return inputDevices
@@ -506,45 +510,59 @@ class PortAudioManager: ObservableObject {
                 // Scale up very small values for better visualization, but keep in reasonable range
                 let scaledRms = min(1.0, rms * 2.0) // Scale up by 2x but cap at 1.0
 
-                // Update audio level and peak level on main thread
-                DispatchQueue.main.async {
-                    manager.audioLevels[deviceID] = scaledRms
+                // Update audio level and peak level on main thread with throttling
+                let now = Date()
+                let shouldUpdate: Bool
+                if let lastUpdate = manager.lastUIUpdateTime[deviceID] {
+                    shouldUpdate = now.timeIntervalSince(lastUpdate) >= manager.uiUpdateInterval
+                } else {
+                    shouldUpdate = true
+                }
 
-                    // Update peak level if current peak is higher
-                    let currentPeak = manager.devicePeakLevels[deviceID] ?? 0.0
-                    if peakSample > currentPeak {
-                        manager.devicePeakLevels[deviceID] = peakSample
+                if shouldUpdate {
+                    DispatchQueue.main.async {
+                        manager.audioLevels[deviceID] = scaledRms
+
+                        // Update peak level if current peak is higher
+                        let currentPeak = manager.devicePeakLevels[deviceID] ?? 0.0
+                        if peakSample > currentPeak {
+                            manager.devicePeakLevels[deviceID] = peakSample
+                        }
+
+                        manager.lastUIUpdateTime[deviceID] = now
+                        manager.updateCounter += 1
+                        // Force UI update by triggering objectWillChange
+                        manager.objectWillChange.send()
                     }
-
-                    manager.updateCounter += 1
-                    // Force UI update by triggering objectWillChange
-                    manager.objectWillChange.send()
                 }
                 
                 // Update waveform data (downsample for display) with proper scaling
-                let downsampledData = stride(from: 0, to: floatSamples.count, by: max(1, floatSamples.count / 100)).map {
-                    var scaledSample = floatSamples[$0] * 2.0
+                // Only update waveform if UI update is due (throttled)
+                if shouldUpdate {
+                    let downsampledData = stride(from: 0, to: floatSamples.count, by: max(1, floatSamples.count / 100)).map {
+                        var scaledSample = floatSamples[$0] * 2.0
 
-                    // Handle NaN and infinite values in waveform data
-                    if scaledSample.isNaN {
-                        scaledSample = 0.0
-                    } else if scaledSample.isInfinite {
-                        scaledSample = scaledSample > 0 ? 1.0 : -1.0
+                        // Handle NaN and infinite values in waveform data
+                        if scaledSample.isNaN {
+                            scaledSample = 0.0
+                        } else if scaledSample.isInfinite {
+                            scaledSample = scaledSample > 0 ? 1.0 : -1.0
+                        }
+
+                        // Scale the samples but keep them in the -1.0 to 1.0 range
+                        return min(1.0, max(-1.0, scaledSample))
                     }
 
-                    // Scale the samples but keep them in the -1.0 to 1.0 range
-                    return min(1.0, max(-1.0, scaledSample))
-                }
-                
-                DispatchQueue.main.async {
-                    // Store the data
-                    manager.waveformData[deviceID] = downsampledData
-                    
-                    // Force UI update by triggering objectWillChange
-                    manager.objectWillChange.send()
-                    
-                    // Also increment update counter to force UI refresh
-                    manager.updateCounter += 1
+                    DispatchQueue.main.async {
+                        // Store the data
+                        manager.waveformData[deviceID] = downsampledData
+
+                        // Force UI update by triggering objectWillChange
+                        manager.objectWillChange.send()
+
+                        // Also increment update counter to force UI refresh
+                        manager.updateCounter += 1
+                    }
                 }
                 
                 return paNoError.rawValue
