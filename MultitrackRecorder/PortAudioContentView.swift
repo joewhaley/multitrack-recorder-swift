@@ -255,13 +255,35 @@ struct RecordingControlsView: View {
                     portAudioManager.chooseExportDirectory()
                 }
                 .buttonStyle(.bordered)
-                
+
                 if let exportDir = portAudioManager.getExportDirectory() {
                     Text("Export to: \(exportDir.lastPathComponent)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else {
                     Text("No export folder selected")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+
+            // Audio Format Selection
+            HStack(spacing: 10) {
+                Text("Audio Format:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Picker("", selection: $portAudioManager.audioFormat) {
+                    ForEach(AudioFormat.allCases) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .disabled(portAudioManager.isRecording || !selectedDevices.isEmpty)
+
+                if portAudioManager.isRecording || !selectedDevices.isEmpty {
+                    Text("Stop all devices to change format")
                         .font(.caption)
                         .foregroundColor(.orange)
                 }

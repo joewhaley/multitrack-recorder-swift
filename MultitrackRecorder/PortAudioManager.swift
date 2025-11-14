@@ -93,6 +93,21 @@ enum BookmarkStore {
 
 // Use PortAudio types directly from bridging header
 
+// Audio format enumeration
+enum AudioFormat: String, CaseIterable, Identifiable {
+    case int16 = "16-bit Integer"
+    case float32 = "32-bit Float"
+
+    var id: String { rawValue }
+
+    var paFormat: PaSampleFormat {
+        switch self {
+        case .int16: return paInt16
+        case .float32: return paFloat32
+        }
+    }
+}
+
 // PortAudio device structure
 struct PortAudioDevice: Identifiable, Hashable, Codable {
     let id: Int32  // Stable hash-based ID for UI and internal use
@@ -114,7 +129,10 @@ class PortAudioManager: ObservableObject {
     @Published var updateCounter: Int = 0
     
     @Published private(set) var isRecording = false
-    
+
+    // Audio format selection
+    @Published var audioFormat: AudioFormat = .int16
+
     // Dedicated dispatch queue for file I/O operations
     private let fileIOQueue = DispatchQueue(label: "com.multitrack.recorder.fileio", qos: .userInitiated)
     
@@ -519,7 +537,7 @@ class PortAudioManager: ObservableObject {
         var inputParameters = PaStreamParameters()
         inputParameters.device = device.portAudioIndex  // Use the PortAudio index for stream operations
         inputParameters.channelCount = 1
-        inputParameters.sampleFormat = paInt16  // Use 16-bit integer format instead of float
+        inputParameters.sampleFormat = audioFormat.paFormat  // Use selected audio format
         inputParameters.suggestedLatency = device.defaultLowInputLatency
         inputParameters.hostApiSpecificStreamInfo = nil
         
@@ -550,40 +568,51 @@ class PortAudioManager: ObservableObject {
                 // Record activity timestamp for health monitoring
                 manager.lastAudioDataTime[deviceID] = Date()
 
-                // Convert input data to Int16 array (16-bit integer samples)
-                let int16Data = input.assumingMemoryBound(to: Int16.self)
-                var samples = Array(UnsafeBufferPointer(start: int16Data, count: Int(frameCount)))
+                // Convert input data to normalized float samples based on format
+                let isFloat32 = manager.audioFormat == .float32
+                var floatSamples: [Float]
 
-                // Apply gain control
+                if isFloat32 {
+                    // Input is already Float32
+                    let float32Data = input.assumingMemoryBound(to: Float.self)
+                    floatSamples = Array(UnsafeBufferPointer(start: float32Data, count: Int(frameCount)))
+                } else {
+                    // Input is Int16, convert to normalized float
+                    let int16Data = input.assumingMemoryBound(to: Int16.self)
+                    floatSamples = (0..<Int(frameCount)).map { i in
+                        Float(int16Data[i]) / 32768.0
+                    }
+                }
+
+                // Apply gain control on float samples
                 let linearGain = manager.getDeviceLinearGain(for: deviceID)
                 if linearGain != 1.0 {
-                    samples = samples.map { sample in
-                        var gainedSample = Float(sample) * linearGain
+                    floatSamples = floatSamples.map { sample in
+                        var gainedSample = sample * linearGain
 
                         // Handle NaN and infinite values
                         if gainedSample.isNaN {
                             gainedSample = 0.0  // Replace NaN with silence
                         } else if gainedSample.isInfinite {
                             // Replace +/-inf with max/min valid values
-                            gainedSample = gainedSample > 0 ? 32767.0 : -32768.0
+                            gainedSample = gainedSample > 0 ? 1.0 : -1.0
                         }
 
-                        // Clamp to Int16 range to prevent overflow
-                        return Int16(max(-32768, min(32767, gainedSample)))
+                        // Clamp to valid range
+                        return max(-1.0, min(1.0, gainedSample))
                     }
                 }
-                
-                // Add to recording buffer if recording (for waveform display)
+
+                // Add to recording buffer if recording
                 if manager.isRecording {
-                    let samplesCopy = samples // Create a copy for the async operation
+                    let samplesCopy = floatSamples // Create a copy for the async operation
                     // Send audio data to file I/O queue for writing to WAV file
                     manager.fileIOQueue.async {
-                        manager.streamAudioData(deviceID: deviceID, samples: samplesCopy)
+                        manager.streamAudioDataFloat(deviceID: deviceID, samples: samplesCopy)
                     }
                 }
-                
-                // Calculate RMS level and peak level (convert to float for calculation)
-                let floatSamples = samples.map { Float($0) / 32768.0 } // Convert Int16 to normalized float
+
+                // Calculate RMS level and peak level (samples already in float)
                 let sumSquares = floatSamples.map { $0 * $0 }.reduce(0, +)
                 let rms = sqrt(sumSquares / Float(floatSamples.count))
 
@@ -748,34 +777,38 @@ class PortAudioManager: ObservableObject {
     
     private func createWavHeader(fileSize: UInt32, dataSize: UInt32) -> Data {
         var header = Data()
-        
+
         let sampleRate: UInt32 = 44100
         let channels: UInt16 = 1
-        let bitsPerSample: UInt16 = 16
+
+        // Format-specific parameters
+        let isFloat = audioFormat == .float32
+        let audioFormatCode: UInt16 = isFloat ? 3 : 1 // 3 = IEEE float, 1 = PCM
+        let bitsPerSample: UInt16 = isFloat ? 32 : 16
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample) / 8
         let blockAlign = channels * bitsPerSample / 8
-        
+
         // RIFF chunk
         header.append(contentsOf: "RIFF".utf8) // 4 bytes
         header.append(withUnsafeBytes(of: fileSize.littleEndian) { Data($0) }) // 4 bytes
-        
+
         // WAVE identifier
         header.append(contentsOf: "WAVE".utf8) // 4 bytes
-        
+
         // fmt chunk
         header.append(contentsOf: "fmt ".utf8) // 4 bytes
         header.append(withUnsafeBytes(of: UInt32(16).littleEndian) { Data($0) }) // fmt chunk size (4 bytes)
-        header.append(withUnsafeBytes(of: UInt16(1).littleEndian) { Data($0) }) // audio format - PCM (2 bytes)
+        header.append(withUnsafeBytes(of: audioFormatCode.littleEndian) { Data($0) }) // audio format (2 bytes)
         header.append(withUnsafeBytes(of: channels.littleEndian) { Data($0) }) // channels (2 bytes)
         header.append(withUnsafeBytes(of: sampleRate.littleEndian) { Data($0) }) // sample rate (4 bytes)
         header.append(withUnsafeBytes(of: byteRate.littleEndian) { Data($0) }) // byte rate (4 bytes)
         header.append(withUnsafeBytes(of: blockAlign.littleEndian) { Data($0) }) // block align (2 bytes)
         header.append(withUnsafeBytes(of: bitsPerSample.littleEndian) { Data($0) }) // bits per sample (2 bytes)
-        
+
         // data chunk
         header.append(contentsOf: "data".utf8) // 4 bytes
         header.append(withUnsafeBytes(of: dataSize.littleEndian) { Data($0) }) // 4 bytes
-        
+
         return header
     }
     
@@ -783,15 +816,25 @@ class PortAudioManager: ObservableObject {
         return createWavHeader(fileSize: 0xFFFFFFFF, dataSize: 0xFFFFFFFF)
     }
     
-    private func streamAudioData(deviceID: Int32, samples: [Int16]) {
+    private func streamAudioDataFloat(deviceID: Int32, samples: [Float]) {
         // This method is now called on the file I/O queue
         // Check if we're still recording and have a valid file handle
         guard isRecording, let fileHandle = wavFileHandles[deviceID] else { return }
-        
-        // Samples are already in Int16 format, no conversion needed
-        // Convert to Data and write to file directly
-        let pcmDataBytes = samples.withUnsafeBufferPointer { Data(buffer: $0) }
-        
+
+        let pcmDataBytes: Data
+
+        if audioFormat == .float32 {
+            // Write as Float32 directly
+            pcmDataBytes = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        } else {
+            // Convert float to Int16
+            let int16Samples = samples.map { sample in
+                let scaled = sample * 32768.0
+                return Int16(max(-32768, min(32767, scaled)))
+            }
+            pcmDataBytes = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        }
+
         do {
             try fileHandle.write(contentsOf: pcmDataBytes)
         } catch {
