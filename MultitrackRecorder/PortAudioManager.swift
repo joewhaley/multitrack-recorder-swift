@@ -172,6 +172,9 @@ class PortAudioManager: ObservableObject {
     private var portAudioStreams: [Int32: UnsafeMutableRawPointer] = [:] // main
     private var userDataPointers: [Int32: UnsafeMutableRawPointer] = [:] // main
     private var wavFileHandles: [Int32: FileHandle] = [:] // fileIOQueue
+
+    // Current session folder (created when recording starts)
+    private var currentSessionFolder: URL?
     
     // Device labels for user customization
     @Published var deviceLabels: [Int32: String] = [:]
@@ -733,25 +736,45 @@ class PortAudioManager: ObservableObject {
     }
     
     // MARK: - Recording Methods
-    
+
+    private func generateSessionFolderName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        return formatter.string(from: Date())
+    }
+
     public func startRecording() {
         isRecording = true
         print("Started recording for devices: \(selectedDevices)")
-        
+
         // Get the export directory and ensure we have access
         guard let exportDir = getExportDirectory() else {
             print("❌ No export directory available - cannot start recording")
             isRecording = false
             return
         }
-        
+
+        // Create session folder with timestamp
+        let sessionFolderName = generateSessionFolderName()
+        let sessionFolder = exportDir.appendingPathComponent(sessionFolderName)
+
+        do {
+            try FileManager.default.createDirectory(at: sessionFolder, withIntermediateDirectories: true)
+            currentSessionFolder = sessionFolder
+            print("📁 Created session folder: \(sessionFolderName)")
+        } catch {
+            print("❌ Failed to create session folder: \(error)")
+            isRecording = false
+            return
+        }
+
         // Initialize streaming WAV files for selected devices
         for deviceID in selectedDevices {
             let customLabel = getDeviceLabel(for: deviceID)
-            let filename = customLabel.isEmpty ? 
-                "device_\(deviceID)_recording.wav" : 
+            let filename = customLabel.isEmpty ?
+                "device_\(deviceID)_recording.wav" :
                 "\(customLabel)_recording.wav"
-            let fileURL = exportDir.appendingPathComponent(filename)
+            let fileURL = sessionFolder.appendingPathComponent(filename)
             
             fileIOQueue.sync {
                 do {
@@ -791,12 +814,12 @@ class PortAudioManager: ObservableObject {
                         finalizeWavFile(deviceID: deviceID)
 
                         // Get the WAV file URL for potential conversion
-                        if let exportDir = getExportDirectory() {
+                        if let sessionFolder = currentSessionFolder {
                             let customLabel = getDeviceLabel(for: deviceID)
                             let filename = customLabel.isEmpty ?
                                 "device_\(deviceID)_recording.wav" :
                                 "\(customLabel)_recording.wav"
-                            let wavURL = exportDir.appendingPathComponent(filename)
+                            let wavURL = sessionFolder.appendingPathComponent(filename)
                             wavFilesToConvert.append(wavURL)
                         }
 
@@ -825,6 +848,9 @@ class PortAudioManager: ObservableObject {
                 convertWAVToFormat(wavURL: wavURL, outputFormat: outputFormat)
             }
         }
+
+        // Clear session folder reference
+        currentSessionFolder = nil
     }
     
     // MARK: - WAV File Streaming Methods
@@ -897,13 +923,13 @@ class PortAudioManager: ObservableObject {
     }
     
     private func finalizeWavFile(deviceID: Int32) {
-        guard let exportDir = getExportDirectory() else { return }
+        guard let sessionFolder = currentSessionFolder else { return }
 
         let customLabel = getDeviceLabel(for: deviceID)
         let filename = customLabel.isEmpty ?
             "device_\(deviceID)_recording.wav" :
             "\(customLabel)_recording.wav"
-        let fileURL = exportDir.appendingPathComponent(filename)
+        let fileURL = sessionFolder.appendingPathComponent(filename)
 
         do {
             // Read the current file to get the data size
@@ -1086,7 +1112,8 @@ class PortAudioManager: ObservableObject {
                 AVNumberOfChannelsKey: 1,
                 AVLinearPCMBitDepthKey: 16,
                 AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false
             ]
 
         case .m4a:
@@ -1104,7 +1131,8 @@ class PortAudioManager: ObservableObject {
                 AVNumberOfChannelsKey: 1,
                 AVLinearPCMBitDepthKey: 16,
                 AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: true  // AIFF uses big-endian
+                AVLinearPCMIsBigEndianKey: true,  // AIFF uses big-endian
+                AVLinearPCMIsNonInterleaved: false  // Required key for AIFF
             ]
         }
     }
