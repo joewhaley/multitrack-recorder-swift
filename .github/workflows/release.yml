@@ -69,51 +69,38 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Rename artifacts with version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mv build/MultitrackRecorder.dmg build/MultitrackRecorder-${VERSION}.dmg
+          mv build/MultitrackRecorder.dmg.sha256 build/MultitrackRecorder-${VERSION}.dmg.sha256
+
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: MultitrackRecorder ${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: false
-          body: |
-            ## MultitrackRecorder ${{ steps.version.outputs.version }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          gh release create "v${VERSION}" \
+            --title "MultitrackRecorder ${VERSION}" \
+            --notes "## MultitrackRecorder ${VERSION}
 
-            ### Installation
-            1. Download the DMG file below
-            2. Open the DMG
-            3. Drag MultitrackRecorder.app to your Applications folder
-            4. Launch from Applications
+          ### Installation
+          1. Download the DMG file below
+          2. Open the DMG
+          3. Drag MultitrackRecorder.app to your Applications folder
+          4. Launch from Applications
 
-            ### Requirements
-            - macOS 14.0 or later
-            - Universal binary (runs natively on both Apple Silicon and Intel Macs)
+          ### Requirements
+          - macOS 14.0 or later
+          - Universal binary (runs natively on both Apple Silicon and Intel Macs)
 
-            ### Checksums
-            SHA256 checksums are provided below for verification.
-
-      - name: Upload DMG to Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./build/MultitrackRecorder.dmg
-          asset_name: MultitrackRecorder-${{ steps.version.outputs.version }}.dmg
-          asset_content_type: application/x-apple-diskimage
-
-      - name: Upload Checksum to Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./build/MultitrackRecorder.dmg.sha256
-          asset_name: MultitrackRecorder-${{ steps.version.outputs.version }}.dmg.sha256
-          asset_content_type: text/plain
+          ### Checksums
+          SHA256 checksums are provided below for verification.
+          \`\`\`
+          $(cat build/MultitrackRecorder-${VERSION}.dmg.sha256)
+          \`\`\`" \
+            build/MultitrackRecorder-${VERSION}.dmg \
+            build/MultitrackRecorder-${VERSION}.dmg.sha256
 
       - name: Clean up keychain
         if: always()
