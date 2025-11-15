@@ -35,6 +35,8 @@ A professional multitrack audio recording application for macOS built with Swift
 - **Xcode**: 15.0 or later (for building from source)
 - **Audio Devices**: Any Core Audio compatible input device (microphones, audio interfaces, etc.)
 
+**Note:** Pre-built releases are universal binaries that run natively on both Apple Silicon (M1/M2/M3) and Intel Macs.
+
 ## Installation
 
 ### Option 1: Build from Source
@@ -45,23 +47,48 @@ A professional multitrack audio recording application for macOS built with Swift
    cd multitrack-recorder
    ```
 
-2. **Install PortAudio** (if not already installed):
+2. **Build the app** (first-time setup takes ~5 minutes):
    ```bash
-   brew install portaudio
+   ./scripts/build_local.sh
    ```
 
-3. **Open in Xcode**:
+   This automatically:
+   - Downloads and builds PortAudio as a universal library
+   - Builds MultitrackRecorder for both arm64 and x86_64
+   - Creates a universal binary that works on all Macs
+
+3. **Alternative: Build in Xcode**:
    ```bash
    open MultitrackRecorder.xcodeproj
    ```
-
-4. **Build and Run**:
    - Select your target device/simulator
    - Press `Cmd+R` to build and run
+   - (PortAudio will be built automatically on first build)
 
 ### Option 2: Download Pre-built App
 
 Download the latest release from the [Releases](https://github.com/yourusername/multitrack-recorder/releases) page.
+
+**Note**: All releases are universal binaries that run natively on both Apple Silicon (M1/M2/M3) and Intel Macs.
+
+## Building for Release
+
+All builds create universal binaries (arm64 + x86_64) that work on both Apple Silicon and Intel Macs.
+
+**Quick local build** (for testing):
+```bash
+./scripts/build_local.sh
+```
+
+**Signed release build** (with notarization):
+```bash
+./scripts/build_release.sh
+```
+
+**Documentation:**
+- [UNIVERSAL_BUILD_SETUP.md](UNIVERSAL_BUILD_SETUP.md) - Universal build system overview
+- [RELEASE.md](RELEASE.md) - Complete release process guide
+- [scripts/README.md](scripts/README.md) - Build scripts and troubleshooting
 
 ## Usage
 

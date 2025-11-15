@@ -142,16 +142,21 @@ Temporary Items
 *.zip
 *.tar.gz
 *.rar
+*.dmg
+*.sha256
 
 # Local configuration files
 config.local.*
 secrets.*
+publish.sh
 
 # Build artifacts
 *.o
-*.a
 *.so
 *.dylib
+
+# Compiled libraries (keep the universal PortAudio)
+# libs/
 
 # Profiling data
 *.prof

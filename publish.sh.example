@@ -1,0 +1,14 @@
+#!/bin/bash
+# Example publish script - copy to publish.sh and add your credentials
+
+# Find your code signing identity
+security find-identity -v -p codesigning
+
+# Set your credentials (DO NOT commit this file with real values!)
+export APPLE_ID="your@email.com"
+export APPLE_TEAM_ID="YOUR_TEAM_ID"
+export CODE_SIGN_IDENTITY="Developer ID Application: Your Name (YOUR_TEAM_ID)"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+
+# Run the release build
+./scripts/build_release.sh

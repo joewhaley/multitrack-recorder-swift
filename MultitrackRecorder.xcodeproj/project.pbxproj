@@ -213,9 +213,9 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				OTHER_LDFLAGS = "-L/opt/homebrew/lib -lportaudio";
-				LIBRARY_SEARCH_PATHS = "/opt/homebrew/lib";
-				HEADER_SEARCH_PATHS = "/opt/homebrew/include";
+				OTHER_LDFLAGS = "$(inherited) -L$(PROJECT_DIR)/libs/portaudio/lib -lportaudio -framework CoreAudio -framework AudioToolbox -framework AudioUnit -framework CoreServices";
+				LIBRARY_SEARCH_PATHS = "$(inherited) $(PROJECT_DIR)/libs/portaudio/lib";
+				HEADER_SEARCH_PATHS = "$(inherited) $(PROJECT_DIR)/libs/portaudio/include";
 				SWIFT_OBJC_BRIDGING_HEADER = "MultitrackRecorder/PortAudio-Bridging-Header.h";
 			};
 			name = Debug;
@@ -272,6 +272,9 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				OTHER_LDFLAGS = "-L$(PROJECT_DIR)/libs/portaudio/lib -lportaudio -framework CoreAudio -framework AudioToolbox -framework AudioUnit -framework CoreServices";
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/libs/portaudio/lib";
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/libs/portaudio/include";
 			};
 			name = Release;
 		};
@@ -324,6 +327,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+				SWIFT_OBJC_BRIDGING_HEADER = "MultitrackRecorder/PortAudio-Bridging-Header.h";
+				ENABLE_HARDENED_RUNTIME = YES;
 			};
 			name = Release;
 		};
