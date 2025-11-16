@@ -11,9 +11,10 @@ A professional multitrack audio recording application for macOS built with Swift
 - **Device Refresh**: Dynamically refresh the input device list without restarting the app
 
 ### 🎵 Audio Features
-- **High-Quality Recording**: 44.1kHz sample rate with 32-bit float precision
-- **WAV File Output**: Industry-standard WAV format with proper headers
+- **High-Quality Recording**: 44.1kHz sample rate with configurable 16-bit PCM or 32-bit float precision
+- **Multiple Output Formats**: Record to WAV or AIFF with optional automatic conversion to M4A (AAC)
 - **Streaming Recording**: Real-time audio streaming to disk for efficient memory usage
+- **Session-Based Organization**: Each recording session is stored in its own timestamped folder
 - **Individual Device Control**: Start/stop recording for each device independently
 
 ### 🎨 User Interface
@@ -21,6 +22,7 @@ A professional multitrack audio recording application for macOS built with Swift
 - **Real-time Waveforms**: Visual representation of audio input for each device
 - **Audio Level Meters**: Live monitoring of input levels with scaling for better visibility
 - **Device Labeling**: Add custom labels to identify your audio devices
+- **Detailed Device Metadata**: Host API, sample rate, channel count, and device IDs shown inline
 - **Responsive Design**: Adaptive layout that works with different window sizes
 
 ### 🔧 Technical Features
@@ -28,6 +30,7 @@ A professional multitrack audio recording application for macOS built with Swift
 - **File System Integration**: User-selected output directory with persistent access via security bookmarks
 - **Sandbox Compliance**: Full macOS sandbox compatibility with proper entitlements
 - **Memory Efficient**: Streaming audio data directly to disk without excessive memory usage
+- **Health Monitoring**: Automatic detection and recovery of stalled PortAudio streams to prevent silent failures
 
 ## Requirements
 
@@ -43,7 +46,7 @@ A professional multitrack audio recording application for macOS built with Swift
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/multitrack-recorder.git
+   git clone https://github.com/joewhaley/multitrack-recorder.git
    cd multitrack-recorder
    ```
 
@@ -67,7 +70,7 @@ A professional multitrack audio recording application for macOS built with Swift
 
 ### Option 2: Download Pre-built App
 
-Download the latest release from the [Releases](https://github.com/yourusername/multitrack-recorder/releases) page.
+Download the latest release from the [Releases](https://github.com/joewhaley/multitrack-recorder/releases) page.
 
 **Note**: All releases are universal binaries that run natively on both Apple Silicon (M1/M2/M3) and Intel Macs.
 
@@ -90,6 +93,8 @@ All builds create universal binaries (arm64 + x86_64) that work on both Apple Si
 - [RELEASE.md](RELEASE.md) - Complete release process guide
 - [scripts/README.md](scripts/README.md) - Build scripts and troubleshooting
 
+The release workflow is automated via GitHub Actions using the GitHub CLI for creating signed, notarized universal binaries and DMG uploads—just push a version tag and the pipeline handles the rest (see [RELEASE_WORKFLOW.md](RELEASE_WORKFLOW.md) for details).
+
 ## Usage
 
 ### Getting Started
@@ -111,9 +116,12 @@ All builds create universal binaries (arm64 + x86_64) that work on both Apple Si
 ### Recording Features
 
 - **Simultaneous Recording**: All selected devices record simultaneously
-- **Individual Files**: Each device creates its own WAV file
+- **Individual Files**: Each device creates its own file in the selected output format
+- **Session Folders**: Recordings from a session are grouped in timestamped folders (YYYY-MM-DD_HH-MM-SS)
 - **File Naming**: Files are automatically named with device information and timestamps
 - **Streaming**: Audio is written to disk in real-time for efficient memory usage
+- **Format Selection**: Choose 16-bit PCM or 32-bit float before arming devices
+- **Automatic Conversion**: Optional WAV-to-M4A conversion with automatic cleanup of the source file
 
 ## File Structure
 
@@ -152,10 +160,10 @@ MultitrackRecorder/
 
 ### File Format
 
-- **Output Format**: WAV (RIFF)
-- **Encoding**: PCM 16-bit signed integer
-- **Headers**: Properly formatted WAV headers with correct byte order
-- **Streaming**: Real-time writing with proper file finalization
+- **Supported Formats**: WAV (RIFF), AIFF, and M4A (AAC via AVFoundation)
+- **Encoding**: WAV/AIFF support both PCM 16-bit and 32-bit float; M4A uses high-quality AAC presets
+- **Headers**: Properly formatted WAV/AIFF headers with correct byte order and metadata
+- **Streaming**: Real-time writing with proper file finalization and optional post-processing conversions
 
 ## Permissions
 
@@ -240,9 +248,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/yourusername/multitrack-recorder/issues)
-- **Discussions**: Join the conversation on [GitHub Discussions](https://github.com/yourusername/multitrack-recorder/discussions)
-- **Documentation**: Check the [Wiki](https://github.com/yourusername/multitrack-recorder/wiki) for detailed guides
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/joewhaley/multitrack-recorder/issues)
+- **Discussions**: Join the conversation on [GitHub Discussions](https://github.com/joewhaley/multitrack-recorder/discussions)
+- **Documentation**: Check the [Wiki](https://github.com/joewhaley/multitrack-recorder/wiki) for detailed guides
 
 ## Changelog
 
